@@ -52,7 +52,7 @@ fetch('PDF_URL').then(r=>r.blob()).then(b=>{
 
 ## CDP桥(tmwd_cdp_bridge扩展) ⭐首选
 扩展路径：`assets/tmwd_cdp_bridge/`(需安装，含debugger权限)
-⚠TID密钥：首次运行自动生成到`assets/tmwd_cdp_bridge/config.js`(已gitignore)，扩展通过manifest引用
+⚠TID约定标识(非密钥)：首次运行自动生成到`assets/tmwd_cdp_bridge/config.js`(已gitignore)，扩展通过manifest引用
 调用：`web_execute_js` script直传JSON字符串（工具层自动识别对象格式，走WS→background.js cmd路由）
 ```js
 // 直接传JSON字符串作为script参数，无需DOM操作
