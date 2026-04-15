@@ -73,7 +73,9 @@ class GeneraticAgent:
 
     def next_llm(self, n=-1):
         self.llm_no = ((self.llm_no + 1) if n < 0 else n) % len(self.llmclients)
+        lastc = self.llmclient
         self.llmclient = self.llmclients[self.llm_no]
+        self.llmclient.backend.history = lastc.backend.history
         self.llmclient.last_tools = ''
         name = self.get_llm_name()
         if 'glm' in name or 'minimax' in name or 'kimi' in name: load_tool_schema('_cn')
@@ -162,10 +164,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', metavar='IODIR', help='一次性任务模式(文件IO)')
     parser.add_argument('--reflect', metavar='SCRIPT', help='反射模式：加载监控脚本，check()触发时发任务')
-    parser.add_argument('--input', help='任务内容')
-    parser.add_argument('--llm_no', type=int, default=0, help='LLM编号')
-    parser.add_argument('--verbose', action='store_true', help='输出包含工具执行结果(监察模式用)')
-    parser.add_argument('--bg', action='store_true', help='后台自举: spawn自身去掉--bg, print PID, exit')
+    parser.add_argument('--input', help='prompt')
+    parser.add_argument('--llm_no', type=int, default=0)
+    parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--bg', action='store_true', help='popen, print PID, exit')
     args = parser.parse_args()
 
     if args.bg:
