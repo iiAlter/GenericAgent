@@ -150,11 +150,13 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
             # 构建 prompt 给 GA
             relative_path = str(f.relative_to(f.parents[2])) if len(f.parents) > 2 else f.name
             prompt = (
-                f"请处理以下 {source_type} 数据。\n\n"
-                f"1. 读取文件: {f}\n"
-                f"2. 分析内容，提取关键信息（摘要、关键点、行动项、决策等）\n"
-                f"3. 用 sidebrain_ingest 将提取的信息保存到 sidebrain 知识库\n"
-                f"4. source 参数设为: {source_type}\n\n"
+                f"请处理以下 {source_type} 数据：\n\n"
+                f"步骤：\n"
+                f"1. 先用 file_read 读取文件: {f}\n"
+                f"2. 分析内容，提取摘要（summary）、关键点（key_points）、行动项（action_items）、决策（decisions）\n"
+                f"3. 调用 sidebrain_ingest 工具（直接调用，不是命令行！），传入 text 参数包含提取的结构化信息\n"
+                f"   - source 参数设为: {source_type}\n"
+                f"   - 格式示例: sidebrain_ingest(text=\"摘要: ...\\n关键点: ...\\n行动项: ...\", source=\"{source_type}\")\n\n"
                 f"数据路径: {f}\n"
                 f"来源类型: {source_type}\n"
                 f"来源标识: {source_id}\n"
