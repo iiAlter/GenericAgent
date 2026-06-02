@@ -1,0 +1,38 @@
+# === 运行时数据 ===
+.state/
+.logs/
+
+# === 用户来源文件（默认忽略，可在用户自己的 fork 中去掉） ===
+sources/meetings/*.md
+sources/meetings/*.txt
+sources/ad_hoc/*.md
+sources/ad_hoc/*.txt
+
+# === 本地配置（不提交真实配置）===
+config.yaml
+config.yml
+sidebrain.config.yaml
+sidebrain.config.yml
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# === 环境 ===
+.env
+.venv/
+venv/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+.DS_Store
+Thumbs.db

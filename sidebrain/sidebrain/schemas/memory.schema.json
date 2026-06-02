@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sidebrain-memory-v1",
+  "title": "Sidebrain Memory Entry",
+  "description": "Schema for sidebrain processed memory entries",
+  "type": "object",
+  "properties": {
+    "frontmatter": {
+      "type": "object",
+      "required": ["schema_version", "id", "created", "updated", "source", "source_path", "source_id", "content_hash"],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "description": "Schema version number, v1 for initial release",
+          "minimum": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "Stable UUID for cross-file references",
+          "pattern": "^[a-f0-9-]{32,}$"
+        },
+        "created": {
+          "type": "string",
+          "description": "ISO date of original creation",
+          "format": "date"
+        },
+        "updated": {
+          "type": "string",
+          "description": "ISO date of last update",
+          "format": "date"
+        },
+        "source": {
+          "type": "string",
+          "description": "Source type",
+          "enum": ["pi_session", "meeting", "ad_hoc", "copied_session"]
+        },
+        "source_path": {
+          "type": "string",
+          "description": "Relative path to trace back to original location"
+        },
+        "source_id": {
+          "type": "string",
+          "description": "Session or file identifier"
+        },
+        "content_hash": {
+          "type": "string",
+          "description": "SHA-256 hash for cross-batch deduplication",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "project": {
+          "type": "string",
+          "description": "Optional project tag, auto-inferred from path"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Optional tags for searchability",
+          "items": { "type": "string" }
+        },
+        "confidence": {
+          "type": "number",
+          "description": "LLM self-assessed confidence score 0-1",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "related": {
+          "type": "array",
+          "description": "Cross-references to other memory IDs",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "key_points": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "action_items": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "decision": { "type": "string" },
+              "reasoning": { "type": "string" },
+              "alternatives": { "type": "string" }
+            }
+          }
+        },
+        "people_mentioned": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "projects_mentioned": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "original_text": {
+          "type": "string",
+          "description": "Full original text for traceability"
+        }
+      }
+    }
+  },
+  "required": ["frontmatter", "body"]
+}

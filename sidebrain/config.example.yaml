@@ -1,0 +1,48 @@
+# Sidebrain 配置示例
+# 复制为 config.yaml 或 sidebrain.config.yaml 后修改
+
+llm:
+  # 复用 GA 的 llmcore
+  client: "ga_llmcore"
+  # 默认模型（与 Pi settings.json 的 defaultModel 对齐）
+  default_model: "deepseek/deepseek-v4-flash"
+  # 高价值条目用这个模型做深度提取
+  high_value_model: "deepseek/deepseek-v4-thinking"
+  # key 来源：引用 GA 的 mykey，不复制
+  key_source: "~/serve/GenericAgent/mykey.py"
+  timeout_sec: 60
+  max_retries: 3
+  prompts_dir: "sidebrain/prompts"
+
+ingest:
+  pi:
+    enabled: true
+    session_glob: "**/*.jsonl"
+    batch_size: 10
+    max_size_mb: 50
+  meetings:
+    enabled: true
+    glob: "**/*.{md,txt}"
+    batch_size: 10
+
+process:
+  batch_size: 10
+  max_concurrent_llm: 2
+  single_file_token_limit: 20000
+  daily_budget_usd: 1.0
+
+sync:
+  max_items: 50
+  dry_run: false
+  tags_filter:
+    - general
+    - rule
+    - preference
+
+mcp:
+  transport: "stdio"
+
+daemon:
+  interval_sec: 300
+  log_rotate_mb: 10
+  log_rotate_count: 5

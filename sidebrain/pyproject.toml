@@ -1,0 +1,19 @@
+[project]
+name = "sidebrain"
+version = "0.1.0"
+description = "Pi 的侧载大脑 — 自动从 Pi 会话/会议纪要中提取知识"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+    "mcp>=1.0",
+    "watchdog>=4.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sidebrain*"]
