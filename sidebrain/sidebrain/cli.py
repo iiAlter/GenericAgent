@@ -10,7 +10,7 @@ from typing import NoReturn
 
 from sidebrain import __version__
 from sidebrain.config import load_config, print_config_safe
-from sidebrain.paths import ensure_dirs, SOURCES_MEETINGS, SOURCES_AD_HOC
+from sidebrain.paths import ensure_dirs, SOURCES_MEETINGS, SOURCES_AD_HOC, SIDEBRAIN_HOME
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         gitkeep.write_text("")
 
     print(f"✓ Sidebrain 数据目录已初始化: {created}")
-    print(f"  数据根: {Path.home() / '.sidebrain'}")
+    print(f"  数据根: {SIDEBRAIN_HOME}")
     print(f"  会议来源: {SOURCES_MEETINGS}")
     print(f"  临时来源: {SOURCES_AD_HOC}")
 

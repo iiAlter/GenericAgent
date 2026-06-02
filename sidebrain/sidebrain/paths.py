@@ -1,8 +1,9 @@
 """路径常量 — 全代码库单点引用。
 
 架构说明：
-- ~/.pi/sidebrain/                 主库（当前服务器唯一真相）
+- ~/.sidebrain/                    主库（GA 私有，独立于 Pi）
 - ~/.pi/agent/memories/sidebrain/  Pi 本地副本（每次 session_start 同步）
+- ~/.pi/agent/rules/sidebrain/     规则副本
 - 其他 agent 各自同步
 """
 
@@ -12,7 +13,9 @@ from pathlib import Path
 # === 包根 ===
 SIDEBRAIN_PKG_ROOT = Path(__file__).resolve().parents[1]
 
-# === 主库（当前服务器，唯一真相）===
+# === 主库（与 Pi sidebrain 共享同一份数据）===
+# 决策：2026-06-03 统一路径，GA 和 Pi 共用 ~/.pi/sidebrain/。
+#       Pi 通过 sidebrain_mcp server 读写，GA 通过 Python 模块直接读写。
 SIDEBRAIN_HOME = Path(os.environ.get(
     "SIDEBRAIN_HOME",
     str(Path.home() / ".pi" / "sidebrain"),
