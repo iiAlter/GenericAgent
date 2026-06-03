@@ -12,13 +12,12 @@ __version__ = "0.1.0"
 
 
 def _setup_logging() -> None:
-    """初始化全局 logging：同时输出到 stderr 和日志文件。"""
+    """初始化全局 logging：同时输出到 stderr 和按日滚动的日志文件。"""
     from sidebrain.paths import LOGS
 
     LOGS.mkdir(parents=True, exist_ok=True)
 
     root_logger = logging.getLogger("sidebrain")
-    # 避免重复初始化
     if root_logger.handlers:
         return
 
@@ -29,14 +28,22 @@ def _setup_logging() -> None:
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
-    # stderr handler
+    # stderr handler（仅 WARNING+）
     sh = logging.StreamHandler()
     sh.setLevel(logging.WARNING)
     sh.setFormatter(fmt)
     root_logger.addHandler(sh)
 
-    # 文件 handler
-    fh = logging.FileHandler(LOGS / "sidebrain.log", encoding="utf-8")
+    # 按日滚动的文件 handler
+    from logging.handlers import TimedRotatingFileHandler
+    fh = TimedRotatingFileHandler(
+        LOGS / "sidebrain.log",
+        when="midnight",
+        interval=1,
+        backupCount=30,
+        encoding="utf-8",
+    )
+    fh.suffix = "%Y-%m-%d"
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
     root_logger.addHandler(fh)
