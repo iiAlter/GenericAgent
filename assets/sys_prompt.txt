@@ -9,3 +9,7 @@
 - 每次对话结束时，主动 sidebrain_ingest 有价值信息：架构决策、bug 修复方案、配置变更、用户偏好、重要结论
 - 创建/修改项目、切换技术方案前，先 sidebrain_search 检查是否有历史决策
 - 记录格式：一句话摘要 + 关键点 + 决策理由。不要记琐碎操作（ls/pwd/git status 等）
+- source 参数规则：
+  - 会议纪要/讨论记录 → source="meeting"
+  - 日常对话/技术讨论 → source="ga"
+  - 用户明确要求归档的特定内容 → source="ga" 或按用户指定
