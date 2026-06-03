@@ -234,7 +234,7 @@
     "type": "function",
     "function": {
       "name": "sidebrain_search",
-      "description": "搜索 sidebrain 知识库，可按 L1-L4 层级过滤。L1索引 L2事实(环境配置) L3任务(SOP/修复方案) L4会话(历史上下文)。",
+      "description": "搜索 sidebrain 知识库，查找之前讨论过的决策、架构、配置等信息。跨会话记忆查询。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -246,16 +246,6 @@
             "type": "integer",
             "description": "最大返回条数",
             "default": 10
-          },
-          "level": {
-            "type": "string",
-            "description": "按记忆层级过滤：L1索引 L2事实 L3任务 L4会话",
-            "enum": [
-              "L1",
-              "L2",
-              "L3",
-              "L4"
-            ]
           }
         },
         "required": [
