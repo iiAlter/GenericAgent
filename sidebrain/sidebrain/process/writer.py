@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from sidebrain.paths import PROCESSED, QUARANTINE, TRASH
+from sidebrain.paths import PROCESSED, QUARANTINE
 
 logger = logging.getLogger(__name__)
 

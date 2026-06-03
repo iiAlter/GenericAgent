@@ -258,9 +258,8 @@ def cmd_process(args: argparse.Namespace) -> None:
     from sidebrain.process_pipeline import process_all
 
     result = process_all(dry_run=args.dry_run)
-    print(f"Total: {result['total']}, Extracted: {result['extracted']}, "
-          f"Written: {result['written']}, Skipped dup: {result['skipped_dup']}, "
-          f"Errors: {result['errors']}")
+    print(f"Total: {result['total']}, Dispatched: {result['dispatched']}, "
+          f"Skipped: {result['skipped']}, Errors: {result['errors']}")
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
