@@ -1,9 +1,10 @@
 """处理 pipeline — 扫描 raw/ 下新数据，通知 GA 处理。
 
-不再自己调 LLM 抽取，改为创建 GA 任务：
+流程：
 1. 扫描 raw/ 下所有未处理的文件
-2. 对每个文件创建 GA task，通知 GA 去分析
-3. GA 读取文件 → LLM 分析 → sidebrain_ingest 存回
+2. 对每个文件创建 GA task，让 GA 分析并输出结构化 JSON
+3. Python 读取 JSON 后直接调 sidebrain_ingest 入库
+（绕过 LLM 工具调用限制，Python 端直接操作）
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from sidebrain.paths import GA_ROOT, PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, STATE
+from sidebrain.mcp_client import ingest as mcp_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -70,15 +72,27 @@ def _call_ga(task_name: str, prompt: str) -> dict:
 
     try:
         logger.info("Calling GA: task=%s", task_name)
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(GA_ROOT),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=600,  # 10 分钟超时
+            start_new_session=True,
         )
+        try:
+            stdout, stderr = proc.communicate(timeout=180)
+            success = proc.returncode == 0
+        except subprocess.TimeoutExpired:
+            # GA 超时，杀进程组后继续（JSON 可能已生成）
+            try:
+                os.killpg(os.getpgid(proc.pid), __import__('signal').SIGKILL)
+            except Exception:
+                proc.kill()
+            stdout, stderr = proc.communicate()
+            success = False  # 超时算 failure，但 process_all 会检查 JSON
 
-        # 读取输出
+        # 读取输出文件
         output_files = sorted(task_dir.glob("output*.txt"))
         outputs = []
         for f in output_files:
@@ -88,13 +102,11 @@ def _call_ga(task_name: str, prompt: str) -> dict:
                 pass
 
         return {
-            "success": result.returncode == 0,
-            "output": "\n".join(outputs) if outputs else result.stdout,
-            "stderr": result.stderr,
-            "returncode": result.returncode,
+            "success": success,
+            "output": "\n".join(outputs) if outputs else stdout,
+            "stderr": stderr,
+            "returncode": proc.returncode,
         }
-    except subprocess.TimeoutExpired:
-        return {"success": False, "output": "", "error": "GA timeout (10min)"}
     except Exception as e:
         return {"success": False, "output": "", "error": str(e)}
 
@@ -147,31 +159,61 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
                 dispatched += 1
                 continue
 
-            # 构建 prompt 给 GA
+            # 构建 prompt 给 GA — 输出 JSON 文件，Python 端负责 ingest
+            json_output_path = GA_ROOT / "temp" / f"_{source_id}_extracted.json"
             relative_path = str(f.relative_to(f.parents[2])) if len(f.parents) > 2 else f.name
             prompt = (
-                f"请处理以下 {source_type} 数据：\n\n"
+                f"请分析以下 {source_type} 数据，提取关键信息后写入 JSON 文件。\n\n"
                 f"步骤：\n"
-                f"1. 先用 file_read 读取文件: {f}\n"
-                f"2. 分析内容，提取摘要（summary）、关键点（key_points）、行动项（action_items）、决策（decisions）\n"
-                f"3. 调用 sidebrain_ingest 工具（直接调用，不是命令行！），传入 text 参数包含提取的结构化信息\n"
-                f"   - source 参数设为: {source_type}\n"
-                f"   - 格式示例: sidebrain_ingest(text=\"摘要: ...\\n关键点: ...\\n行动项: ...\", source=\"{source_type}\")\n\n"
+                f"1. 用 file_read 读取: {f}\n"
+                f"2. 分析内容，提取摘要、关键点、行动项、决策\n"
+                f"3. 用 file_write 将结果写入 JSON 文件: {json_output_path}\n\n"
+                f"JSON 格式：\n"
+                f"{{\n"
+                f'  "summary": "一句话摘要",\n'
+                f'  "key_points": ["关键点1", "关键点2"],\n'
+                f'  "action_items": ["行动项1", "行动项2"],\n'
+                f'  "decisions": ["决策1", "决策2"],\n'
+                f'  "tags": ["标签1", "标签2"]\n'
+                f"}}\n\n"
                 f"数据路径: {f}\n"
                 f"来源类型: {source_type}\n"
                 f"来源标识: {source_id}\n"
+                f"JSON 输出路径: {json_output_path}\n"
             )
 
             task_name = f"sidebrain_{source_type}_{source_id[:20]}"
             result = _call_ga(task_name, prompt)
 
-            if result["success"]:
-                dispatched += 1
-                new_hashes.append(content_hash)
-                logger.info("GA task completed: %s", task_name)
+            # 检查 JSON 输出（GA 超时时也可能已生成）
+            if json_output_path.exists():
+                try:
+                    data = json.loads(json_output_path.read_text(encoding="utf-8"))
+                    text_parts = [f"# {data.get('summary', source_id)}"]
+                    if data.get("key_points"):
+                        text_parts.append("\n关键点:")
+                        for kp in data["key_points"]:
+                            text_parts.append(f"- {kp}")
+                    if data.get("action_items"):
+                        text_parts.append("\n行动项:")
+                        for ai in data["action_items"]:
+                            text_parts.append(f"- [ ] {ai}")
+                    if data.get("decisions"):
+                        text_parts.append("\n决策:")
+                        for d in data["decisions"]:
+                            text_parts.append(f"- {d}")
+                    ingest_result = mcp_ingest("\n".join(text_parts), source=source_type)
+                    logger.info("Ingested via MCP: %s", ingest_result.get("id"))
+                    json_output_path.unlink(missing_ok=True)
+                    dispatched += 1
+                    new_hashes.append(content_hash)
+                    logger.info("GA task completed: %s", task_name)
+                except Exception as e:
+                    logger.error("Failed to ingest from JSON: %s", e)
+                    errors += 1
             else:
                 errors += 1
-                logger.error("GA task failed: %s - %s", task_name,
+                logger.error("GA task failed, no JSON: %s - %s", task_name,
                              result.get("error", result.get("stderr", "unknown")))
 
     # 更新游标
