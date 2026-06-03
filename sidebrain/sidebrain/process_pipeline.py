@@ -123,12 +123,20 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
     cursor = _load_cursor()
     processed_hashes = set(cursor.get("processed_hashes", []))
 
-    raw_dirs = [
+    # 扫描所有 raw 子目录（pi/meetings/ad_hoc/ga 以及第三方 agent 目录）
+    raw_dirs: list[tuple[Path, str]] = [
         (RAW_PI, "pi_session"),
         (RAW_MEETINGS, "meeting"),
         (RAW_AD_HOC, "ad_hoc"),
         (RAW_GA, "ga_session"),
     ]
+    # 动态发现其他 agent 的 raw 子目录
+    raw_base = RAW_PI.parent  # knowledge/raw/
+    if raw_base.exists():
+        known = {RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA}
+        for sub in raw_base.iterdir():
+            if sub.is_dir() and sub not in known:
+                raw_dirs.append((sub, sub.name))
 
     total = 0
     dispatched = 0
