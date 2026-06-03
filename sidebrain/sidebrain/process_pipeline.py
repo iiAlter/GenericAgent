@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from sidebrain.paths import GA_ROOT, PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, STATE
-from sidebrain.mcp_client import ingest as mcp_ingest
+from sidebrain.process.writer import write_processed
 
 logger = logging.getLogger(__name__)
 
@@ -192,24 +192,20 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
             if json_output_path.exists():
                 try:
                     data = json.loads(json_output_path.read_text(encoding="utf-8"))
-                    text_parts = [f"# {data.get('summary', source_id)}"]
-                    if data.get("key_points"):
-                        text_parts.append("\n关键点:")
-                        for kp in data["key_points"]:
-                            text_parts.append(f"- {kp}")
-                    if data.get("action_items"):
-                        text_parts.append("\n行动项:")
-                        for ai in data["action_items"]:
-                            text_parts.append(f"- [ ] {ai}")
-                    if data.get("decisions"):
-                        text_parts.append("\n决策:")
-                        for d in data["decisions"]:
-                            text_parts.append(f"- {d}")
-                    ingest_result = mcp_ingest("\n".join(text_parts), source=source_type)
-                    logger.info("Ingested via MCP: %s", ingest_result.get("id"))
+                    result = write_processed(
+                        extracted=data,
+                        source=source_type,
+                        source_path=str(f),
+                        source_id=source_id,
+                    )
+                    if result["success"]:
+                        logger.info("Written to processed: %s", result["id"])
+                        dispatched += 1
+                        new_hashes.append(content_hash)
+                    else:
+                        logger.error("Write failed: %s", result.get("error"))
+                        errors += 1
                     json_output_path.unlink(missing_ok=True)
-                    dispatched += 1
-                    new_hashes.append(content_hash)
                     logger.info("GA task completed: %s", task_name)
                 except Exception as e:
                     logger.error("Failed to ingest from JSON: %s", e)
