@@ -10,7 +10,7 @@ Sidebrain 是一个跨 Agent 共享知识库，通过 MCP（Model Context Protoc
 ### 服务地址
 
 ```
-https://mcp_sidebrain.yhao.ccwu.cc/mcp
+https://mcp.yhao.ccwu.cc/sidebrain
 ```
 
 ### 可用工具（5 个）
@@ -35,7 +35,7 @@ https://mcp_sidebrain.yhao.ccwu.cc/mcp
 {
   "mcpServers": {
     "sidebrain": {
-      "url": "https://mcp_sidebrain.yhao.ccwu.cc/mcp"
+      "url": "https://mcp.yhao.ccwu.cc/sidebrain"
     }
   }
 }
@@ -48,13 +48,13 @@ https://mcp_sidebrain.yhao.ccwu.cc/mcp
 ```
 名称: sidebrain
 类型: HTTP
-地址: https://mcp_sidebrain.yhao.ccwu.cc/mcp
+地址: https://mcp.yhao.ccwu.cc/sidebrain
 ```
 
 ### 自定义代码（TypeScript）
 
 ```typescript
-const response = await fetch('https://mcp_sidebrain.yhao.ccwu.cc/mcp', {
+const response = await fetch('https://mcp.yhao.ccwu.cc/sidebrain', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -76,7 +76,7 @@ console.log(data.result.content[0].text);
 ```python
 import requests, json
 
-resp = requests.post('https://mcp_sidebrain.yhao.ccwu.cc/mcp', json={
+resp = requests.post('https://mcp.yhao.ccwu.cc/sidebrain', json={
     'jsonrpc': '2.0',
     'id': '1',
     'method': 'tools/call',
@@ -92,27 +92,27 @@ print(resp.json()['result']['content'][0]['text'])
 
 ```bash
 # 搜索
-curl -s https://mcp_sidebrain.yhao.ccwu.cc/mcp \
+curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_search","arguments":{"query":"架构","limit":3}}}'
 
 # 写入
-curl -s https://mcp_sidebrain.yhao.ccwu.cc/mcp \
+curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_ingest","arguments":{"summary":"决策记录","key_points":["要点1","要点2"],"tags":["project-x"]}}}'
 
 # 列出所有条目
-curl -s https://mcp_sidebrain.yhao.ccwu.cc/mcp \
+curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_list_projects","arguments":{}}}'
 
 # 获取详情
-curl -s https://mcp_sidebrain.yhao.ccwu.cc/mcp \
+curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_get","arguments":{"topic_id":"关键词"}}}'
 
 # 触发服务端扫描
-curl -s https://mcp_sidebrain.yhao.ccwu.cc/mcp \
+curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_scan","arguments":{}}}'
 ```
