@@ -139,7 +139,9 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
         if not raw_dir.exists():
             continue
 
-        files = sorted(raw_dir.glob("*.md"))
+        # Pi sessions 是 .jsonl，其他是 .md
+        glob_pattern = "*.jsonl" if source_type == "pi_session" else "*.md"
+        files = sorted(raw_dir.glob(glob_pattern))
         logger.info("Found %d raw files in %s", len(files), raw_dir.name)
 
         for f in files:
