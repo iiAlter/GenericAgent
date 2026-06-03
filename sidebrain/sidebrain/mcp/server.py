@@ -30,12 +30,13 @@ JSONRPC_VERSION = "2.0"
 # ============================================================
 
 
-def tool_sidebrain_search(query: str, limit: int = 10) -> dict[str, Any]:
+def tool_sidebrain_search(query: str, limit: int = 10, level: str = "") -> dict[str, Any]:
     """搜索处理后的记忆条目。
 
     Args:
         query: 搜索关键词。
         limit: 最大返回条数，默认 10。
+        level: 可选，按 L1/L2/L3/L4 过滤。
 
     Returns:
         {"entries": [...]}
@@ -44,24 +45,28 @@ def tool_sidebrain_search(query: str, limit: int = 10) -> dict[str, Any]:
         return {"entries": []}
 
     query_lower = query.lower()
+    level_filter = level.upper() if level else ""
     results: list[dict[str, Any]] = []
 
     for f in sorted(PROCESSED.rglob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        # level 过滤：检查文件是否在 L{level}/ 子目录下
+        if level_filter:
+            parts = f.relative_to(PROCESSED).parts
+            if not parts or parts[0] != level_filter:
+                continue
+
         try:
             text = f.read_text(encoding="utf-8")
         except Exception:
             continue
 
-        # 搜索 frontmatter + body
         if query_lower not in text.lower():
             continue
 
-        # 提取 frontmatter
         frontmatter = _extract_frontmatter(text)
         if not frontmatter:
             continue
 
-        # 提取 body
         body_data = _extract_body(text)
 
         entry = {
@@ -71,6 +76,7 @@ def tool_sidebrain_search(query: str, limit: int = 10) -> dict[str, Any]:
             "tags": frontmatter.get("tags", []),
             "project": frontmatter.get("project", ""),
             "confidence": frontmatter.get("confidence", 0),
+            "level": body_data.get("level", "L4"),
             "summary": body_data.get("summary", ""),
             "key_points": body_data.get("key_points", []),
             "action_items": body_data.get("action_items", []),
@@ -193,12 +199,13 @@ _TOOL_HANDLERS: dict[str, Any] = {
 _TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "sidebrain_search",
-        "description": "搜索 sidebrain 记忆库中已处理的条目",
+        "description": "搜索 sidebrain 记忆库中已处理的条目，可按 L1-L4 层级过滤",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "搜索关键词"},
                 "limit": {"type": "integer", "description": "最大返回条数", "default": 10},
+                "level": {"type": "string", "description": "按记忆层级过滤：L1索引 L2事实 L3任务 L4会话", "enum": ["L1", "L2", "L3", "L4"]},
             },
             "required": ["query"],
         },

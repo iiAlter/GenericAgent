@@ -185,8 +185,13 @@ def write_processed(
     PROCESSED.mkdir(parents=True, exist_ok=True)
 
     # 计算内容哈希
+    level = extracted.get("level", "L4")  # 默认 L4 会话层
+    if level not in ("L1", "L2", "L3", "L4"):
+        level = "L4"
+
     body_data = {
         "summary": extracted.get("summary", ""),
+        "level": level,
         "key_points": extracted.get("key_points", []),
         "action_items": extracted.get("action_items", []),
         "decisions": extracted.get("decisions", []),
@@ -220,12 +225,12 @@ def write_processed(
         _move_to_quarantine(source_id, "validation_failed", content)
         return {"success": False, "path": None, "id": frontmatter.get("id"), "error": error_msg}
 
-    # 确定目标路径
+    # 确定目标路径：processed/L{level}/<tag>/  (L1-L4 分级目录)
     tags = extracted.get("tags", [])
     first_tag = tags[0] if tags else (project or "_uncategorized")
     safe_tag = re.sub(r"[^\w\-]", "_", first_tag).lower()
 
-    project_dir = PROCESSED / safe_tag
+    project_dir = PROCESSED / level / safe_tag
     project_dir.mkdir(parents=True, exist_ok=True)
 
     # 生成文件名（使用标题关键词）
