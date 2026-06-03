@@ -27,6 +27,7 @@ PROCESSED = KNOWLEDGE / "processed"
 RAW_PI = KNOWLEDGE / "raw" / "pi"
 RAW_MEETINGS = KNOWLEDGE / "raw" / "meetings"
 RAW_AD_HOC = KNOWLEDGE / "raw" / "ad_hoc"
+RAW_GA = KNOWLEDGE / "raw" / "ga"
 QUARANTINE = KNOWLEDGE / "quarantine"
 STATE = SIDEBRAIN_HOME / "state"
 LOGS = SIDEBRAIN_HOME / "logs"
@@ -46,7 +47,7 @@ SOURCES_AD_HOC = SIDEBRAIN_PKG_ROOT / "sources" / "ad_hoc"
 
 # === 需要 mkdir 的目录 ===
 _ALL_DIRS = [
-    PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, QUARANTINE,
+    PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA, QUARANTINE,
     STATE, LOGS,
     PI_MEMORIES_MIRROR, PI_RULES_MIRROR,
 ]

@@ -23,6 +23,7 @@ from sidebrain.ingest.pi_watcher import ingest_pi_sessions
 from sidebrain.paths import STATE
 from sidebrain.process_pipeline import process_all
 from sidebrain.sync.pi_mirror import sync_to_pi
+from sidebrain.ingest.ga_watcher import ingest_ga_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,14 @@ def _run_once(cfg: dict) -> dict[str, Any]:
         except Exception as e:
             logger.error("Meeting ingest failed: %s", e)
             results["ingest_meetings"] = {"ingested": 0, "error": str(e)}
+
+    # 2.5. Ingest GA sessions
+    try:
+        ga_result = ingest_ga_sessions()
+        results["ingest_ga"] = ga_result
+    except Exception as e:
+        logger.error("GA ingest failed: %s", e)
+        results["ingest_ga"] = {"ingested": 0, "error": str(e)}
 
     # 3. Process
     try:

@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from sidebrain.paths import GA_ROOT, PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, STATE
+from sidebrain.paths import GA_ROOT, PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA, STATE
 from sidebrain.process.writer import write_processed
 
 logger = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ def process_all(dry_run: bool = False) -> dict[str, Any]:
         (RAW_PI, "pi_session"),
         (RAW_MEETINGS, "meeting"),
         (RAW_AD_HOC, "ad_hoc"),
+        (RAW_GA, "ga_session"),
     ]
 
     total = 0

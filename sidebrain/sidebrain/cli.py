@@ -144,12 +144,13 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     """状态汇总：计数/最后运行/quarantine/下一批。"""
-    from sidebrain.paths import RAW_PI, RAW_MEETINGS, RAW_AD_HOC, PROCESSED, QUARANTINE, STATE
+    from sidebrain.paths import RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA, PROCESSED, QUARANTINE, STATE
 
     cfg = load_config(args.config)
 
     pi_files = list(RAW_PI.glob("*.md")) if RAW_PI.exists() else []
     meeting_files = list(RAW_MEETINGS.glob("*.md")) if RAW_MEETINGS.exists() else []
+    ga_files = list(RAW_GA.glob("*.md")) if RAW_GA.exists() else []
     ad_hoc_files = list(RAW_AD_HOC.glob("*.md")) if RAW_AD_HOC.exists() else []
     processed = list(PROCESSED.rglob("*.md")) if PROCESSED.exists() else []
     quarantined = list(QUARANTINE.glob("*.md")) if QUARANTINE.exists() else []
@@ -157,6 +158,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     # 游标
     pi_cursor = STATE / "pi_cursor.json"
     meeting_cursor = STATE / "meeting_cursor.json"
+    ga_cursor = STATE / "ga_cursor.json"
 
     import json
 
@@ -180,6 +182,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     print()
     print(f"  Raw PI sessions:    {len(pi_files)}")
     print(f"  Raw meetings:       {len(meeting_files)}")
+    print(f"  Raw GA sessions:    {len(ga_files)}")
     print(f"  Raw ad-hoc:         {len(ad_hoc_files)}")
     print(f"  Processed entries:  {len(processed)}")
     print(f"  Quarantined:        {len(quarantined)}")
@@ -238,6 +241,15 @@ def cmd_ingest_meetings(args: argparse.Namespace) -> None:
 
     result = ingest_meetings(batch_size=cfg["ingest"]["meetings"]["batch_size"])
     print(f"Ingested: {result['ingested']}, Errors: {result['errors']}")
+    _update_metrics(result)
+
+
+def cmd_ingest_ga(args: argparse.Namespace) -> None:
+    """摄入 GA model_responses 对话。"""
+    from sidebrain.ingest.ga_watcher import ingest_ga_sessions
+
+    result = ingest_ga_sessions(batch_size=args.batch_size)
+    print(f"Ingested: {result['ingested']}, Skipped: {result['skipped']}, Errors: {result['errors']}")
     _update_metrics(result)
 
 
@@ -493,6 +505,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ingest_meetings = p_ingest_sub.add_parser("meetings", help="摄入会议纪要")
     p_ingest_meetings.set_defaults(func=cmd_ingest_meetings)
+
+    p_ingest_ga = p_ingest_sub.add_parser("ga", help="摄入 GA 对话记录")
+    p_ingest_ga.add_argument("--batch-size", type=int, default=10, help="单次处理数量")
+    p_ingest_ga.set_defaults(func=cmd_ingest_ga)
 
     p_ingest_text = p_ingest_sub.add_parser("text", help="摄入文本（stdin 或参数）")
     p_ingest_text.add_argument("text", nargs="?", help="要摄入的文本（留空则读 stdin）")
