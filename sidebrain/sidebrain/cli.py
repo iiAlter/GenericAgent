@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import NoReturn
@@ -326,6 +327,86 @@ def cmd_mcp_status(args: argparse.Namespace) -> None:
         print(f"✗ MCP server is not installed")
 
 
+def cmd_mcp_serve_http(args: argparse.Namespace) -> None:
+    """启动 Node.js MCP server（HTTP 模式），供第三方 agent 远程连接。"""
+    import subprocess
+    import signal
+    import sys
+    from pathlib import Path
+    from sidebrain.paths import STATE
+
+    server_path = Path.home() / ".pi" / "agent" / "extensions" / "sidebrain-mcp-server.mjs"
+    if not server_path.exists():
+        print(f"✗ MCP server 文件不存在: {server_path}")
+        sys.exit(1)
+
+    pid_file = STATE / "mcp_http.pid"
+    port = args.port
+
+    if args.stop:
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, signal.SIGTERM)
+                pid_file.unlink()
+                print(f"✓ MCP HTTP server 已停止 (PID: {pid})")
+            except (ProcessLookupError, ValueError):
+                pid_file.unlink()
+                print("MCP HTTP server 已不在运行，清理 PID 文件")
+        else:
+            print("MCP HTTP server 未在运行")
+        return
+
+    if args.status:
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                print(f"✓ MCP HTTP server 运行中 (PID: {pid}, 端口: {port})")
+            except (ProcessLookupError, ValueError):
+                pid_file.unlink()
+                print("MCP HTTP server 未在运行 (残留 PID 文件已清理)")
+        else:
+            print("MCP HTTP server 未在运行")
+        return
+
+    # 检查是否已在运行
+    if pid_file.exists():
+        try:
+            pid = int(pid_file.read_text().strip())
+            os.kill(pid, 0)
+            print(f"MCP HTTP server 已在运行 (PID: {pid})")
+            sys.exit(0)
+        except (ProcessLookupError, ValueError):
+            pid_file.unlink()
+
+    # 启动
+    env = {**os.environ, "SIDEBRAIN_PORT": str(port)}
+    proc = subprocess.Popen(
+        ["node", str(server_path), "--http"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
+
+    pid_file.write_text(str(proc.pid))
+    print(f"✓ MCP HTTP server 已启动")
+    print(f"  PID: {proc.pid}")
+    print(f"  端口: {port}")
+    print(f"  地址: http://0.0.0.0:{port}/mcp")
+    if args.daemon:
+        print("  模式: daemon（后台运行）")
+    else:
+        print("  模式: 前台（按 Ctrl+C 停止）")
+        try:
+            proc.wait()
+        except KeyboardInterrupt:
+            proc.terminate()
+            pid_file.unlink()
+            print("\nMCP HTTP server 已停止")
+
+
 def cmd_daemon_start(args: argparse.Namespace) -> None:
     """启动守护进程。"""
     from sidebrain.daemon import start_daemon
@@ -444,6 +525,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mcp_status = p_mcp_sub.add_parser("status", help="检查安装状态")
     p_mcp_status.set_defaults(func=cmd_mcp_status)
+
+    p_mcp_http = p_mcp_sub.add_parser("serve-http", help="启动 MCP HTTP server（供第三方 agent 远程连接）")
+    p_mcp_http.add_argument("--port", type=int, default=19000, help="监听端口（默认 19000）")
+    p_mcp_http.add_argument("--stop", action="store_true", help="停止 HTTP server")
+    p_mcp_http.add_argument("--status", action="store_true", help="查看 HTTP server 状态")
+    p_mcp_http.add_argument("--daemon", "-d", action="store_true", help="后台运行")
+    p_mcp_http.set_defaults(func=cmd_mcp_serve_http)
 
     # daemon
     p_daemon = sub.add_parser("daemon", help="守护进程控制")

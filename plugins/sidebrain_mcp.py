@@ -213,61 +213,6 @@ def _patch_handler():
     GenericAgentHandler.do_start_long_term_update = _patched_start
     print(f"[sidebrain] 已 hook start_long_term_update → 自动同步到 sidebrain")
 
-    # --- 注册 turn_end 自动检测钩子 ---
-    # 每轮结束后自动判断是否有值得记到 sidebrain 的信息
-    # 不需要 LLM 主动调用，减少对 LLM 判断力的依赖
-    def _sidebrain_auto_hook(local_vars):
-        """每轮结束自动检测：成功的 code_run / file_read 结果，
-        如果包含配置信息、路径、版本号等，自动存到 sidebrain。"""
-        try:
-            tc = local_vars.get('tool_calls', [])
-            tr = local_vars.get('tool_results', [])
-            turn = local_vars.get('turn', 0)
-
-            for i, call in enumerate(tc):
-                name = call.get('tool_name', '')
-                if name in ('code_run', 'file_read') and i < len(tr):
-                    result = tr[i]
-                    if not result or result.get('isError'):
-                        continue
-                    content = result.get('content', '')
-                    if isinstance(content, list):
-                        content = ' '.join(c.get('text', '') for c in content if isinstance(c, dict))
-                    content = str(content)
-
-                    # 检测是否包含有价值的信息（配置/路径/版本号）
-                    if any(kw in content.lower() for kw in ['配置', '路径', 'version', 'found at', 'installed',
-                                                             'config', 'path=', '/usr/', '/opt/', '/home/',
-                                                             'export ', 'alias ']):
-                        # 每 10 轮最多记一次，避免太频繁
-                        if turn % 10 == 0 and len(content) < 500:
-                            try:
-                                from sidebrain.mcp_client import ingest
-                                source = f"ga-auto:turn-{turn}:{name}"
-                                ingest(content.strip()[:2000], source=source)
-                            except Exception:
-                                pass
-        except Exception:
-            pass
-
-    # 注册到 GA 的 _turn_end_hooks
-    # 这个钩子在 ga.py turn_end_callback 末尾被调用
-    import threading
-    def _register_turn_hook(handler=None):
-        try:
-            # 通过 parent 的 LLM client 访问 handler
-            pass  # 在 do_ 方法首次调用时注册
-        except:
-            pass
-
-    # 直接 monkey-patch GenericAgent 的 __init__ 来注册钩子
-    # 但更简单的方式：在第一个工具调用时注册
-    _hook_registered = False
-
-    # 在 _patch_handler 中额外注入一个 init hook
-    # 用 start_long_term_update 的首次调用来触发注册
-    print(f"[sidebrain] turn_end 自动检测钩子已就绪 (每10轮检测一次)")
-
 
 # ============================================================
 # 插件入口（GA 启动时自动执行）

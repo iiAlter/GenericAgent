@@ -15,5 +15,8 @@ dependencies = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[project.scripts]
+sidebrain = "sidebrain.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["sidebrain*"]

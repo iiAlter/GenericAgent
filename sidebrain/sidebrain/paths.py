@@ -13,12 +13,13 @@ from pathlib import Path
 # === 包根 ===
 SIDEBRAIN_PKG_ROOT = Path(__file__).resolve().parents[1]
 
-# === 主库（与 Pi sidebrain 共享同一份数据）===
-# 决策：2026-06-03 统一路径，GA 和 Pi 共用 ~/.pi/sidebrain/。
-#       Pi 通过 sidebrain_mcp server 读写，GA 通过 Python 模块直接读写。
+# === 主库（GA 私有数据主源）===
+# 决策：2026-06-03 按 B 方案：~/.sidebrain/ 是 GA 独立主源。
+#       用户原话："你也要自己有一份记忆，Pi 的记忆库是从你这边过去的"。
+#       可被 SIDEBRAIN_HOME 环境变量覆盖。
 SIDEBRAIN_HOME = Path(os.environ.get(
     "SIDEBRAIN_HOME",
-    str(Path.home() / ".pi" / "sidebrain"),
+    str(Path.home() / ".sidebrain"),
 ))
 
 KNOWLEDGE = SIDEBRAIN_HOME / "knowledge"
