@@ -21,6 +21,16 @@ MCP_SERVER_NODE = "node"
 _process: subprocess.Popen | None = None
 
 
+def _get_env() -> dict:
+    """构建带有 sidebrain token 的环境变量。"""
+    import os
+    env = os.environ.copy()
+    token = os.environ.get("SIDEBRAIN_TOKEN", "")
+    if token:
+        env["SIDEBRAIN_TOKEN"] = token
+    return env
+
+
 def _ensure_server() -> subprocess.Popen:
     """确保 MCP server 子进程在运行。"""
     global _process
@@ -37,6 +47,7 @@ def _ensure_server() -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=_get_env(),
     )
 
     # 先初始化

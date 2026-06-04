@@ -5,6 +5,25 @@ Sidebrain 是一个跨 Agent 共享知识库，通过 MCP（Model Context Protoc
 
 ---
 
+## 鉴权
+
+所有请求需携带 Bearer Token：
+
+```
+Authorization: Bearer <your-token>
+```
+
+Token 通过环境变量 `SIDEBRAIN_TOKEN` 配置，或使用已分发的 token。
+本地 localhost 请求（`127.0.0.1:19000`）暂不需要鉴权。
+
+### 生成 Token
+
+```bash
+node ~/.pi/agent/extensions/sidebrain-mcp-server.mjs --token-generate
+```
+
+---
+
 ## 快速接入
 
 ### 服务地址
@@ -54,9 +73,14 @@ https://mcp.yhao.ccwu.cc/sidebrain
 ### 自定义代码（TypeScript）
 
 ```typescript
+const TOKEN = process.env.SIDEBRAIN_TOKEN || 'your-token-here';
+
 const response = await fetch('https://mcp.yhao.ccwu.cc/sidebrain', {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${TOKEN}`,
+  },
   body: JSON.stringify({
     jsonrpc: '2.0',
     id: '1',
@@ -74,46 +98,57 @@ console.log(data.result.content[0].text);
 ### 自定义代码（Python）
 
 ```python
-import requests, json
+import requests, json, os
 
-resp = requests.post('https://mcp.yhao.ccwu.cc/sidebrain', json={
-    'jsonrpc': '2.0',
-    'id': '1',
-    'method': 'tools/call',
-    'params': {
-        'name': 'sidebrain_search',
-        'arguments': {'query': '架构', 'limit': 5}
-    }
-})
+TOKEN = os.environ.get('SIDEBRAIN_TOKEN', 'your-token-here')
+
+resp = requests.post('https://mcp.yhao.ccwu.cc/sidebrain',
+    headers={'Authorization': f'Bearer {TOKEN}'},
+    json={
+        'jsonrpc': '2.0',
+        'id': '1',
+        'method': 'tools/call',
+        'params': {
+            'name': 'sidebrain_search',
+            'arguments': {'query': '架构', 'limit': 5}
+        }
+    })
 print(resp.json()['result']['content'][0]['text'])
 ```
 
 ### 命令行（curl）
 
 ```bash
+TOKEN="${SIDEBRAIN_TOKEN:-your-token-here}"
+
 # 搜索
 curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_search","arguments":{"query":"架构","limit":3}}}'
 
 # 写入
 curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_ingest","arguments":{"summary":"决策记录","key_points":["要点1","要点2"],"tags":["project-x"]}}}'
 
 # 列出所有条目
 curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_list_projects","arguments":{}}}'
 
 # 获取详情
 curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_get","arguments":{"topic_id":"关键词"}}}'
 
 # 触发服务端扫描
 curl -s https://mcp.yhao.ccwu.cc/sidebrain \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":"1","method":"tools/call","params":{"name":"sidebrain_scan","arguments":{}}}'
 ```
 
