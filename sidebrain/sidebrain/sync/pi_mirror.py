@@ -198,7 +198,8 @@ def sync_to_pi(
         try:
             tmp = target.with_suffix(".md.tmp")
             tmp.write_text(pi_markdown, encoding="utf-8")
-            os.fsync(tmp.fileno() if hasattr(tmp, "fileno") else os.open(tmp, os.O_RDONLY))
+            with tmp.open("rb") as f_tmp:
+                os.fsync(f_tmp.fileno())
             tmp.replace(target)
             synced += 1
             logger.info("Synced to Pi: %s", target)

@@ -1,10 +1,13 @@
-"""守护进程 — 定时增量摄入 + 处理 + 同步。
+"""守护进程 — 定时增量摄入 + 处理。
 
 每隔 interval_sec 秒执行一次完整 pipeline：
 1. Ingest Pi sessions
 2. Ingest meetings
 3. Process raw → processed
-4. Sync to Pi mirror
+
+Sidebrain 的默认运行模式是纯 MCP pull：~/.sidebrain/ 是唯一主源，
+Pi 和其他客户端通过 MCP 查询/拉取。Pi 镜像只保留为手动导出命令，
+daemon 不主动写客户端记忆目录。
 """
 
 from __future__ import annotations
@@ -22,7 +25,6 @@ from sidebrain.ingest.meeting_watcher import ingest_meetings
 from sidebrain.ingest.pi_watcher import ingest_pi_sessions
 from sidebrain.paths import STATE
 from sidebrain.process_pipeline import process_all
-from sidebrain.sync.pi_mirror import sync_to_pi
 from sidebrain.ingest.ga_watcher import ingest_ga_sessions
 
 logger = logging.getLogger(__name__)
@@ -112,17 +114,6 @@ def _run_once(cfg: dict) -> dict[str, Any]:
     except Exception as e:
         logger.error("Process failed: %s", e)
         results["process"] = {"written": 0, "error": str(e)}
-
-    # 4. Sync
-    try:
-        sync_result = sync_to_pi(
-            tags_filter=cfg["sync"]["tags_filter"],
-            max_items=cfg["sync"]["max_items"],
-        )
-        results["sync"] = sync_result
-    except Exception as e:
-        logger.error("Sync failed: %s", e)
-        results["sync"] = {"synced": 0, "error": str(e)}
 
     return results
 

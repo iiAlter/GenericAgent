@@ -39,7 +39,8 @@ def _load_cursor() -> dict:
 def _save_cursor(cursor: dict) -> None:
     tmp = CURSOR_FILE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cursor, indent=2))
-    os.fsync(tmp.fileno() if hasattr(tmp, "fileno") else os.open(tmp, os.O_RDONLY))
+    with tmp.open("rb") as f:
+        os.fsync(f.fileno())
     tmp.replace(CURSOR_FILE)
 
 

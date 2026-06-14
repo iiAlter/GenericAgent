@@ -24,7 +24,7 @@
 │    1. 扫描 raw/ 下新文件（按 content hash 去重）              │
 │    2. 逐个 spawn GA agentmain.py --task                      │
 │    3. GA 读取文件 → LLM 提取摘要/关键点/决策 → 写 JSON        │
-│    4. Python 读 JSON → writer 结构化入库 (JSON frontmatter)   │
+│    4. Python 校验/规范化 JSON → writer 结构化入库              │
 │                                                             │
 │  raw/ ──→ ~/.sidebrain/knowledge/processed/<tag>/*.md       │
 └──────────────────────────┬──────────────────────────────────┘
@@ -36,6 +36,8 @@
 │  Python MCP (mcp/server.py)     Node.js MCP (.mjs)          │
 │  ├─ stdio JSON-RPC              ├─ stdio JSON-RPC           │
 │  ├─ 直读 processed/*.md         ├─ 直读 processed/*.md      │
+│  ├─ status/type/topic_key 过滤   ├─ status/type/topic_key 过滤│
+│  └─ related/supersedes 展开      └─ related/supersedes 展开 │
 │  └─ GA 本地使用                  ├─ Pi extension 集成        │
 │                                  ├─ HTTP 模式（systemd）     │
 │                                  └─ 远程客户端接入            │
@@ -86,13 +88,14 @@
 | **增量摄入** | `ingest/pi_watcher.py` | 游标驱动增量扫描 Pi sessions |
 | **会议摄入** | `ingest/meeting_watcher.py` | 游标驱动增量扫描会议纪要 |
 | **临时摄入** | `ingest/ad_hoc.py` | stdin/参数直写 |
-| **处理管线** | `process_pipeline.py` | 扫描 raw → spawn GA → 读取 JSON → 写 processed |
+| **处理管线** | `process_pipeline.py` | 扫描 raw → spawn GA → 读取 JSON → 校验后写 processed |
+| **抽取校验** | `process/validate.py` | 规范化 GA JSON，拒绝缺摘要/坏状态/坏置信度，失败进 quarantine |
 | **写入引擎** | `process/writer.py` | JSON frontmatter + body markdown，校验 + 原子写入 + quarantine |
 | **去重** | `process/dedup.py` | content hash 去重，`list_projects()` |
 | **LLM 封装** | `llm.py` | 调用 GA 的 llmcore（支持 native_oai / mixin 配置） |
 | **MCP 服务** | `mcp/server.py` | Python MCP server（stdio JSON-RPC），4 个工具 |
 | **MCP 客户端** | `mcp_client.py` | Python 端通过子进程调 Node.js MCP server |
-| **守护进程** | `daemon.py` | 定时执行 ingest → process → sync（PID 锁 + 信号处理） |
+| **守护进程** | `daemon.py` | 定时执行 ingest → process（PID 锁 + 信号处理） |
 | **健康检查** | `health.py` | `sidebrain health` 快速报告 |
 | **CLI** | `cli.py` | 所有子命令入口 |
 | **Pi 扩展** | `~/.pi/agent/extensions/sidebrain.ts` | Pi 内 /sidebrain 命令 + 5 个工具 |
@@ -130,9 +133,18 @@ python3 -m sidebrain daemon start
 python3 -m sidebrain daemon status
 python3 -m sidebrain daemon stop
 
+# 可选手动导出（把精选 processed 条目写到 Pi 镜像目录）
+python3 -m sidebrain sync --dry-run
+python3 -m sidebrain sync
+
 # 快速健康检查
 python3 -m sidebrain health
 ```
+
+## 接入教程
+
+- Pi 本地使用方式和第三方 agent 接入教程：[`THIRD_PARTY_AGENT_USAGE.md`](./THIRD_PARTY_AGENT_USAGE.md)
+- 旧版 MCP 快速说明：[`MCP_USAGE.md`](./MCP_USAGE.md)
 
 ## 生产部署
 
@@ -165,8 +177,9 @@ systemctl --user start sidebrain-mcp.service
    python3 agentmain.py --task sidebrain_pi_session_<id> --nobg
    ```
 4. GA 读取文件 → LLM 分析 → 写入 JSON 到 `temp/_<id>_extracted.json`
-5. Python 读取 JSON，调用 `write_processed()` 写入 `processed/<tag>/<title>_<id>.md`
-6. 更新 `state/process_cursor.json` 游标
+5. Python 读取 JSON，先规范化字段并校验必填摘要、状态、置信度和决策结构
+6. 合格结果调用 `write_processed()` 写入 `processed/<tag>/<title>_<id>.md`，不合格结果写入 `quarantine/validation__*.json`
+7. 更新 `state/process_cursor.json` 游标
 
 ### 3. 去重策略
 
@@ -190,8 +203,8 @@ def do_sidebrain_list_projects(self, args, response):  # 列出项目
 
 | 工具 | Python 端 | Node.js 端 | 说明 |
 |------|-----------|------------|------|
-| `sidebrain_search` | ✅ `mcp/server.py` | ✅ `.mjs` | 搜索已处理条目 |
-| `sidebrain_get` | ✅ | ✅ | 获取单条详情 |
+| `sidebrain_search` | ✅ `mcp/server.py` | ✅ `.mjs` | 加权搜索已处理条目，支持 status/type/topic_key 过滤 |
+| `sidebrain_get` | ✅ | ✅ | 获取单条详情，并展开 related/supersedes 关联 |
 | `sidebrain_ingest` | ✅ | ✅ | 摄入文本 |
 | `sidebrain_list_projects` | ✅ | ✅ | 列出项目 |
 | `sidebrain_scan` | ❌ | ✅ `.mjs` + `.ts` | 触发后台处理 |
@@ -201,10 +214,10 @@ def do_sidebrain_list_projects(self, args, response):  # 列出项目
 
 ## 关键设计决策
 
-- **数据归属**：`~/.sidebrain/` 是 GA 的主源。Pi 通过 MCP 拉取，GA 不主动写 Pi 目录
+- **数据归属**：`~/.sidebrain/` 是唯一主源。Pi 和第三方 agent 通过 MCP pull 查询/拉取，GA/daemon 不主动写 Pi 目录
 - **AI 分析**：使用 GA 的 `agentmain.py --task` 模式（非直接 tool call），因为 DeepSeek function calling 限制导致 sidebrain_ingest 工具不可见。GA 用 `file_write` 写 JSON 中间文件，Python 端读 JSON 入库
 - **stdio vs HTTP**：Python MCP 用 stdio（GA 子进程），Node.js MCP 支持两种模式（systemd HTTP 服务 + Pi 内部 stdio）
-- **sync 子系统已废弃**：`sidebrain/sync/pi_mirror.py` 和 `sidebrain sync` CLI 命令是旧 push 架构残留，待迁移完成后删除（详见 `PI_HANDOVER.md`）
+- **Pi 镜像是可选导出**：`sidebrain sync` 只作为手动导出/降级缓存能力保留；daemon 默认不执行 sync，避免 `~/.sidebrain/` 与 Pi 镜像出现双主源
 - **跨平台路径**：`sidebrain.ts` 的 `_doScan` 统一使用 `replace(/\\/g, "/")` 处理 Windows 反斜杠
 
 ## 变更日志
@@ -214,4 +227,5 @@ def do_sidebrain_list_projects(self, args, response):  # 列出项目
 - **GA 集成**: `ga.py` 新增 4 个 `do_sidebrain_*` handler，通过 `mcp_client` 调用 MCP
 - **process_pipeline**: GA 用 file_write 写 JSON 中间文件方案（解决 DeepSeek tool call 限制）
 - **路径统一**: `~/.sidebrain/` 为 GA 主源（`paths.py`），Node.js 端同步
-- **sync 标记废弃**: PI_HANDOVER.md 记录迁移计划
+- **默认纯 MCP pull**: daemon 移除自动 sync；`sidebrain sync` 保留为可选手动导出
+- **检索优先级**: 搜索按 `topic_key` 精确/部分命中、summary、tags、key_points、全文依次加权；默认只返回 active 记忆

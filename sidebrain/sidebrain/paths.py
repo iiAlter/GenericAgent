@@ -2,9 +2,8 @@
 
 架构说明：
 - ~/.sidebrain/                    主库（GA 私有，独立于 Pi）
-- ~/.pi/agent/memories/sidebrain/  Pi 本地副本（每次 session_start 同步）
-- ~/.pi/agent/rules/sidebrain/     规则副本
-- 其他 agent 各自同步
+- Pi 和其他客户端通过 MCP pull 读取主库
+- ~/.pi/agent/{memories,rules}/sidebrain/ 仅用于手动 sidebrain sync 导出
 """
 
 import os
@@ -38,7 +37,7 @@ GA_ROOT = Path.home() / "serve" / "GenericAgent"
 # === Pi 源 ===
 PI_HOME = Path.home() / ".pi" / "agent"
 PI_SESSIONS = PI_HOME / "sessions"
-PI_MEMORIES_MIRROR = PI_HOME / "memories" / "sidebrain"   # Pi 本地副本
+PI_MEMORIES_MIRROR = PI_HOME / "memories" / "sidebrain"   # 手动导出副本
 PI_RULES_MIRROR = PI_HOME / "rules" / "sidebrain"
 
 # === 源文件 dropbox ===
@@ -49,7 +48,6 @@ SOURCES_AD_HOC = SIDEBRAIN_PKG_ROOT / "sources" / "ad_hoc"
 _ALL_DIRS = [
     PROCESSED, RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA, QUARANTINE,
     STATE, LOGS,
-    PI_MEMORIES_MIRROR, PI_RULES_MIRROR,
 ]
 
 

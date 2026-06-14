@@ -31,6 +31,8 @@ process:
   single_file_token_limit: 20000
   daily_budget_usd: 1.0
 
+# 手动导出到 Pi 镜像时使用。daemon 默认不执行 sync；
+# 主路径是客户端通过 MCP 从 ~/.sidebrain/ pull。
 sync:
   max_items: 50
   dry_run: false

@@ -1,50 +1,50 @@
 # Sidebrain 架构重构 — Pi 执行清单
 
-> 由 GA 于 2026-06-03 生成。任务下发：服务器 = 本机；删除 `pi_mirror`；新增 MCP `init`/`sync` 工具。
+> 由 GA 于 2026-06-03 生成，2026-06-04 更新决策：默认运行模式改为纯 MCP pull；Pi 镜像只保留为可选手动导出。
 
 ---
 
 ## 🧭 背景
 
-**旧架构（已废弃）**：GA 主动写 `~/.pi/agent/memories/sidebrain/`（push）
-**新架构**：客户端通过 MCP `init`/`sync` 拉取（pull）
+**旧默认架构（已废弃）**：GA/daemon 主动写 `~/.pi/agent/memories/sidebrain/`（push）
+**新默认架构**：客户端通过 MCP 查询/拉取（pull）
+**保留能力**：`sidebrain sync` 可作为手动导出，把精选 processed 条目写入 Pi 镜像目录，用于离线/降级缓存。
 
 **铁律**：
 - GA 沉淀 → `~/.sidebrain/`（服务器主源）
-- 客户端 init/sync → 通过 MCP（stdin/stdout JSON-RPC）
-- GA **不主动**写任何客户端的 `~/.sidebrain/` 或 `~/.pi/agent/memories/`
+- 客户端查询/拉取 → 通过 MCP（stdio/HTTP JSON-RPC）
+- GA/daemon **不主动**写任何客户端的 `~/.sidebrain/` 或 `~/.pi/agent/memories/`
+- `sidebrain sync` 是人工触发的导出命令，不是事实源同步机制
 
 ---
 
-## 📌 Issue 1: 删除 pi_mirror
+## 📌 Issue 1: 移除 daemon 自动 Pi 镜像写入
 
-**目标**：移除 GA 主动写 Pi 记忆库的代码路径
+**目标**：移除默认后台流程中主动写 Pi 记忆库的代码路径；保留手动 `sidebrain sync` 作为可选导出。
 
 ### 文件改动
 
 | # | 文件 | 动作 |
 |---|------|------|
-| 1.1 | `sidebrain/sync/pi_mirror.py` | 🗑️ 删除整个文件（216 行）|
-| 1.2 | `sidebrain/sync/__init__.py` | 🗑️ 删除（0 字节空文件）|
-| 1.3 | `sidebrain/sync/` 目录 | 🗑️ 删除空目录 |
-| 1.4 | `sidebrain/cli.py` (line 265-276) | ✂️ 删 `cmd_sync` 函数 |
-| 1.5 | `sidebrain/cli.py` subparser 段 | ✂️ 删 `sync` 子命令注册（搜 `add_parser("sync"` 找到那段）|
-| 1.6 | `sidebrain/daemon.py:_run_once` | ✂️ 删 sync 步骤（搜 `sync_to_pi` 或 `sync` pipeline 段，保留 ingest/process）|
-| 1.7 | `sidebrain/config.py` (line 45-49) | ✂️ 删 `sync` 配置块（含 `max_items`/`dry_run`/`tags_filter`）|
-| 1.8 | `config.example.yaml` (line 34-40) | ✂️ 删 `sync:` 段 |
-| 1.9 | `sidebrain/paths.py` (line 40-41) | ✂️ 删 `PI_MEMORIES_MIRROR`、`PI_RULES_MIRROR` 两行 |
-| 1.10 | `README.md` | ✂️ 架构图里"Pi 镜像"行；文字里的镜像说明 |
-| 1.11 | `plan.md` 架构段 | ✂️ 改写为"pull 模式：客户端通过 MCP 拉取" |
+| 1.1 | `sidebrain/daemon.py:_run_once` | ✂️ 删 sync 步骤，保留 ingest/process |
+| 1.2 | `sidebrain/paths.py` | ✅ 保留 `PI_MEMORIES_MIRROR` / `PI_RULES_MIRROR` 常量给手动导出用，但不放入默认 `ensure_dirs()` |
+| 1.3 | `sidebrain/health.py` | ✂️ 不再把 Pi 镜像目录作为默认健康检查项 |
+| 1.4 | `sidebrain/cli.py` | ✅ 保留 `sidebrain sync` 子命令，定位为手动导出 |
+| 1.5 | `config.example.yaml` | 📝 标注 `sync` 只用于手动导出 |
+| 1.6 | `README.md` | 📝 说明默认纯 MCP pull，Pi 镜像是可选导出 |
 
 ### 验收
 
 ```bash
 cd ~/serve/GenericAgent/sidebrain
-grep -rn "pi_mirror\|PI_MEMORIES_MIRROR\|PI_RULES_MIRROR" .
+grep -rn "sync_to_pi" sidebrain/daemon.py
 # 应该 0 命中
 
 python3 -m sidebrain --help
-# 应该看不到 sync 子命令
+# 应该仍可看到 sync 子命令（手动导出）
+
+python3 -m sidebrain health
+# 不应检查 mirror/memories 或 mirror/rules
 ```
 
 ---

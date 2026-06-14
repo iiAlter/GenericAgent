@@ -11,7 +11,7 @@ from typing import NoReturn
 
 from sidebrain import __version__
 from sidebrain.config import load_config, print_config_safe
-from sidebrain.paths import ensure_dirs, SOURCES_MEETINGS, SOURCES_AD_HOC, SIDEBRAIN_HOME
+from sidebrain.paths import ensure_dirs, SOURCES_MEETINGS, SOURCES_AD_HOC, SIDEBRAIN_HOME, GA_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
-    """健康自检：依赖/路径/权限/LLM 联通。"""
+    """健康自检：依赖/路径/权限；--llm 时额外测试 LLM 联通。"""
     cfg = load_config(args.config)
     all_ok = True
 
@@ -59,7 +59,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     print()
 
     # 1. 依赖检查
-    print("[1/6] 依赖检查...")
+    total_steps = 6 if args.llm else 5
+    print(f"[1/{total_steps}] 依赖检查...")
     deps = [
         ("pyyaml", "yaml"),
         ("mcp", "mcp"),
@@ -73,7 +74,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
             all_ok = False
 
     # 2. 路径检查
-    print("[2/6] 路径检查...")
+    print(f"[2/{total_steps}] 路径检查...")
     try:
         created = ensure_dirs()
         if created:
@@ -85,10 +86,12 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         all_ok = False
 
     # 3. GA llmcore 可导入
-    print("[3/6] GA llmcore 联通...")
+    print(f"[3/{total_steps}] GA llmcore 联通...")
     try:
         import importlib  # noqa: F811
 
+        if str(GA_ROOT) not in sys.path:
+            sys.path.insert(0, str(GA_ROOT))
         spec = importlib.util.find_spec("llmcore")
         if spec is None:
             print("  ✗ llmcore 未在 sys.path 中")
@@ -100,7 +103,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         all_ok = False
 
     # 4. mykey 可加载
-    print("[4/6] GA mykey 检查...")
+    print(f"[4/{total_steps}] GA mykey 检查...")
     ga_mykey = Path.home() / "serve" / "GenericAgent" / "mykey.py"
     if ga_mykey.exists():
         print(f"  ✓ mykey 存在: {ga_mykey}")
@@ -108,23 +111,26 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         print(f"  ✗ mykey 不存在: {ga_mykey}")
         all_ok = False
 
-    # 5. LLM ping
-    print("[5/6] LLM 快速测试...")
-    try:
-        from sidebrain.llm import quick_ask
+    if args.llm:
+        # 5. LLM ping
+        print(f"[5/{total_steps}] LLM 快速测试...")
+        try:
+            from sidebrain.llm import quick_ask
 
-        result = quick_ask('回复"OK"即可', cfg_name=cfg["llm"]["default_model"])
-        if result:
-            print(f"  ✓ LLM 响应正常: {result[:80]}...")
-        else:
-            print("  ✗ LLM 返回空")
+            result = quick_ask('回复"OK"即可', cfg_name=cfg["llm"]["default_model"])
+            if result:
+                print(f"  ✓ LLM 响应正常: {result[:80]}...")
+            else:
+                print("  ✗ LLM 返回空")
+                all_ok = False
+        except Exception as e:
+            print(f"  ✗ LLM 测试失败: {e}")
             all_ok = False
-    except Exception as e:
-        print(f"  ✗ LLM 测试失败: {e}")
-        all_ok = False
+    else:
+        print("  ○ 跳过 LLM 快速测试（使用 doctor --llm 启用）")
 
-    # 6. MCP 可用
-    print("[6/6] MCP SDK 检查...")
+    # MCP 可用
+    print(f"[{total_steps}/{total_steps}] MCP SDK 检查...")
     try:
         import mcp  # noqa: F811
 
@@ -145,13 +151,14 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 def cmd_status(args: argparse.Namespace) -> None:
     """状态汇总：计数/最后运行/quarantine/下一批。"""
     from sidebrain.paths import RAW_PI, RAW_MEETINGS, RAW_AD_HOC, RAW_GA, PROCESSED, QUARANTINE, STATE
+    from sidebrain.process_pipeline import get_backlog
 
     cfg = load_config(args.config)
 
-    pi_files = list(RAW_PI.glob("*.md")) if RAW_PI.exists() else []
-    meeting_files = list(RAW_MEETINGS.glob("*.md")) if RAW_MEETINGS.exists() else []
-    ga_files = list(RAW_GA.glob("*.md")) if RAW_GA.exists() else []
-    ad_hoc_files = list(RAW_AD_HOC.glob("*.md")) if RAW_AD_HOC.exists() else []
+    pi_files = list(RAW_PI.rglob("*.md")) if RAW_PI.exists() else []
+    meeting_files = list(RAW_MEETINGS.rglob("*.md")) if RAW_MEETINGS.exists() else []
+    ga_files = list(RAW_GA.rglob("*.md")) if RAW_GA.exists() else []
+    ad_hoc_files = list(RAW_AD_HOC.rglob("*.md")) if RAW_AD_HOC.exists() else []
     processed = list(PROCESSED.rglob("*.md")) if PROCESSED.exists() else []
     quarantined = list(QUARANTINE.glob("*.md")) if QUARANTINE.exists() else []
 
@@ -189,10 +196,37 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(f"  Last PI cursor:     {last_pi}")
     print(f"  Last meeting cursor: {last_meeting}")
     print()
+    backlog = get_backlog()
+    print("  Backlog:")
+    print(f"    Pending raw:      {backlog['pending']}")
+    print(f"    Batch size:       {backlog['batch_size']}")
+    print(f"    Rounds remaining: {backlog['rounds_remaining']}")
+    print()
     if metrics:
         print("  Metrics:")
         for k, v in metrics.items():
             print(f"    {k}: {v}")
+
+
+def cmd_backlog(args: argparse.Namespace) -> None:
+    """显示 process backlog。"""
+    from sidebrain.process_pipeline import get_backlog
+
+    backlog = get_backlog(batch_size=args.batch_size)
+    print("=== Sidebrain Backlog ===")
+    print()
+    print(f"  Total raw files:    {backlog['total']}")
+    print(f"  Already processed:  {backlog['processed']}")
+    print(f"  Pending:            {backlog['pending']}")
+    print(f"  Batch size:         {backlog['batch_size']}")
+    print(f"  Rounds remaining:   {backlog['rounds_remaining']}")
+    print()
+    print("  By source:")
+    for source, stats in sorted(backlog["by_source"].items()):
+        print(
+            f"    {source}: total={stats['total']}, "
+            f"processed={stats['processed']}, pending={stats['pending']}"
+        )
 
 
 def _update_metrics(ingest_result: dict) -> None:
@@ -218,6 +252,8 @@ def _update_metrics(ingest_result: dict) -> None:
     import os
     tmp = metrics_file.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(metrics, indent=2))
+    with tmp.open("rb") as f:
+        os.fsync(f.fileno())
     tmp.replace(metrics_file)
 
 
@@ -267,11 +303,49 @@ def cmd_ingest_text(args: argparse.Namespace) -> None:
 
 def cmd_process(args: argparse.Namespace) -> None:
     """处理 raw → processed。"""
-    from sidebrain.process_pipeline import process_all
+    from sidebrain.process_pipeline import get_backlog, process_all
 
-    result = process_all(dry_run=args.dry_run)
-    print(f"Total: {result['total']}, Dispatched: {result['dispatched']}, "
-          f"Skipped: {result['skipped']}, Errors: {result['errors']}")
+    if not args.all:
+        result = process_all(dry_run=args.dry_run, batch_size=args.batch_size)
+        print(f"Total: {result['total']}, Dispatched: {result['dispatched']}, "
+              f"Skipped: {result['skipped']}, Deferred: {result.get('deferred', 0)}, "
+              f"Errors: {result['errors']}")
+        return
+
+    if args.dry_run:
+        backlog = get_backlog(batch_size=args.batch_size)
+        print(f"Dry run: {backlog['pending']} pending files, "
+              f"{backlog['rounds_remaining']} estimated rounds.")
+        result = process_all(dry_run=True, batch_size=args.batch_size)
+        print(f"Round 1: Total: {result['total']}, Dispatched: {result['dispatched']}, "
+              f"Skipped: {result['skipped']}, Deferred: {result.get('deferred', 0)}, "
+              f"Errors: {result['errors']}")
+        return
+
+    totals = {"total": 0, "dispatched": 0, "skipped": 0, "deferred": 0, "errors": 0}
+    rounds = 0
+    while True:
+        backlog = get_backlog(batch_size=args.batch_size)
+        if backlog["pending"] <= 0:
+            break
+        if args.max_rounds is not None and rounds >= args.max_rounds:
+            break
+
+        rounds += 1
+        result = process_all(dry_run=False, batch_size=args.batch_size)
+        for key in totals:
+            totals[key] += int(result.get(key, 0))
+        print(f"Round {rounds}: Total: {result['total']}, Dispatched: {result['dispatched']}, "
+              f"Skipped: {result['skipped']}, Deferred: {result.get('deferred', 0)}, "
+              f"Errors: {result['errors']}")
+
+        if result.get("dispatched", 0) == 0:
+            print("Stopped: no entries were dispatched in the last round.")
+            break
+
+    remaining = get_backlog(batch_size=args.batch_size)
+    print(f"Done: rounds={rounds}, dispatched={totals['dispatched']}, "
+          f"errors={totals['errors']}, pending={remaining['pending']}")
 
 
 def cmd_sync(args: argparse.Namespace) -> None:
@@ -489,11 +563,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     # doctor
     p_doctor = sub.add_parser("doctor", help="健康自检")
+    p_doctor.add_argument("--llm", action="store_true", help="额外执行 LLM ping（可能较慢/消耗额度）")
     p_doctor.set_defaults(func=cmd_doctor)
 
     # status
     p_status = sub.add_parser("status", help="状态汇总")
     p_status.set_defaults(func=cmd_status)
+
+    # backlog
+    p_backlog = sub.add_parser("backlog", help="查看 raw → processed 积压")
+    p_backlog.add_argument("--batch-size", type=int, default=None, help="用于估算剩余轮数的批大小")
+    p_backlog.set_defaults(func=cmd_backlog)
 
     # ingest
     p_ingest = sub.add_parser("ingest", help="摄入数据（pi/meetings/ad_hoc）")
@@ -517,6 +597,9 @@ def build_parser() -> argparse.ArgumentParser:
     # process
     p_process = sub.add_parser("process", help="处理 raw → processed")
     p_process.add_argument("--dry-run", action="store_true", help="仅模拟预览")
+    p_process.add_argument("--batch-size", type=int, default=None, help="覆盖本次处理批大小")
+    p_process.add_argument("--all", action="store_true", help="连续处理直到 backlog 清空或达到 --max-rounds")
+    p_process.add_argument("--max-rounds", type=int, default=None, help="配合 --all 使用，限制最多处理轮数")
     p_process.set_defaults(func=cmd_process)
 
     # sync

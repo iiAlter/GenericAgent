@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from sidebrain.paths import PROCESSED, QUARANTINE
+from sidebrain.process.dedup import check_duplicate
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,13 @@ def _make_frontmatter(
     source_id: str,
     content_hash: str,
     project: str | None = None,
+    memory_type: str | None = None,
+    status: str | None = None,
+    topic_key: str | None = None,
     tags: list[str] | None = None,
     confidence: float | None = None,
     related: list[str] | None = None,
+    supersedes: list[str] | None = None,
 ) -> dict[str, Any]:
     """生成标准化的 frontmatter。"""
     today = time.strftime("%Y-%m-%d")
@@ -54,16 +59,22 @@ def _make_frontmatter(
         "source_path": source_path,
         "source_id": source_id,
         "content_hash": content_hash,
+        "type": memory_type or "note",
+        "status": status or "active",
     }
 
     if project:
         frontmatter["project"] = project
+    if topic_key:
+        frontmatter["topic_key"] = topic_key
     if tags:
         frontmatter["tags"] = tags
     if confidence is not None:
         frontmatter["confidence"] = round(confidence, 2)
     if related:
         frontmatter["related"] = related
+    if supersedes:
+        frontmatter["supersedes"] = supersedes
 
     return frontmatter
 
@@ -95,6 +106,32 @@ def _format_markdown(frontmatter: dict, body: dict) -> str:
         lines.append(original)
 
     return "\n".join(lines)
+
+
+def _extract_frontmatter(text: str) -> dict[str, Any] | None:
+    match = re.search(r"^---\s*(\{.*?\})\s*---\s*", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+
+def _find_active_topic(topic_key: str) -> tuple[Path, dict[str, Any]] | None:
+    if not topic_key or not PROCESSED.exists():
+        return None
+
+    for f in PROCESSED.rglob("*.md"):
+        try:
+            frontmatter = _extract_frontmatter(f.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if not frontmatter:
+            continue
+        if frontmatter.get("topic_key") == topic_key and frontmatter.get("status", "active") == "active":
+            return f, frontmatter
+    return None
 
 
 def _validate_frontmatter(fm: dict) -> list[str]:
@@ -134,11 +171,20 @@ def _atomic_write(target: Path, content: str) -> bool:
         return False
 
 
+def _safe_filename_part(value: str, default: str = "untitled", max_len: int = 80) -> str:
+    """Make a string safe for a single filename segment."""
+    safe = re.sub(r"[^\w\- ]", "_", value, flags=re.UNICODE).strip(" _-")
+    safe = safe.replace(" ", "_")
+    return (safe or default)[:max_len]
+
+
 def _move_to_quarantine(source_id: str, reason: str, content: str) -> None:
     """将失败的内容移入隔离区。"""
     QUARANTINE.mkdir(parents=True, exist_ok=True)
     ts = time.strftime("%Y%m%d%H%M%S")
-    q_file = QUARANTINE / f"process__{source_id}__{ts}__{reason}.md"
+    safe_source_id = _safe_filename_part(source_id, default="unknown", max_len=80)
+    safe_reason = _safe_filename_part(reason, default="error", max_len=40)
+    q_file = QUARANTINE / f"process__{safe_source_id}__{ts}__{safe_reason}.md"
     try:
         q_file.write_text(content, encoding="utf-8")
         logger.info("Moved to quarantine: %s", q_file.name)
@@ -195,6 +241,53 @@ def write_processed(
         "original_text": extracted.get("original_text", ""),
     }
     content_hash = _compute_content_hash(body_data)
+    topic_key = extracted.get("topic_key")
+
+    existing_topic = _find_active_topic(topic_key) if topic_key else None
+    if existing_topic:
+        target, frontmatter = existing_topic
+        today = time.strftime("%Y-%m-%d")
+        frontmatter.update({
+            "updated": today,
+            "source": source,
+            "source_path": source_path,
+            "source_id": source_id,
+            "content_hash": content_hash,
+            "type": extracted.get("type", frontmatter.get("type", "note")),
+            "status": extracted.get("status", frontmatter.get("status", "active")),
+        })
+        for key in ("tags", "confidence", "related", "supersedes"):
+            if extracted.get(key) is not None:
+                frontmatter[key] = extracted[key]
+        if project is not None:
+            frontmatter["project"] = project
+        elif frontmatter.get("project") is None:
+            inferred = _infer_project(source_path)
+            if inferred:
+                frontmatter["project"] = inferred
+
+        content = _format_markdown(frontmatter, body_data)
+        success = _atomic_write(target, content)
+        return {
+            "success": success,
+            "path": str(target) if success else None,
+            "id": frontmatter.get("id"),
+            "error": None if success else "write_error",
+            "updated": success,
+            "topic_key": topic_key,
+        }
+
+    duplicate = check_duplicate(content_hash)
+    if duplicate:
+        logger.info("Exact duplicate found, skip write: %s", duplicate.get("path"))
+        frontmatter = duplicate.get("frontmatter", {})
+        return {
+            "success": True,
+            "path": duplicate.get("path"),
+            "id": frontmatter.get("id"),
+            "error": None,
+            "duplicate": True,
+        }
 
     # 推断项目
     if project is None:
@@ -207,8 +300,13 @@ def write_processed(
         source_id=source_id,
         content_hash=content_hash,
         project=project,
+        memory_type=extracted.get("type"),
+        status=extracted.get("status"),
+        topic_key=topic_key,
         tags=extracted.get("tags", []),
         confidence=extracted.get("confidence"),
+        related=extracted.get("related"),
+        supersedes=extracted.get("supersedes"),
     )
 
     # 校验
@@ -230,8 +328,9 @@ def write_processed(
 
     # 生成文件名（使用标题关键词）
     summary = extracted.get("summary", source_id)[:40]
-    safe_summary = re.sub(r"[^\w\- ]", "", summary).strip().replace(" ", "_")
-    filename = f"{safe_summary}__{source_id[:12]}.md"
+    safe_summary = _safe_filename_part(summary, default="untitled", max_len=40)
+    safe_source_id = _safe_filename_part(source_id, default="unknown", max_len=80)
+    filename = f"{safe_summary}__{safe_source_id[:12]}.md"
     target = project_dir / filename
 
     # 写入

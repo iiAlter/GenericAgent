@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from sidebrain.ingest.ad_hoc import ingest_text
 from sidebrain.paths import PROCESSED
@@ -30,7 +33,13 @@ JSONRPC_VERSION = "2.0"
 # ============================================================
 
 
-def tool_sidebrain_search(query: str, limit: int = 10) -> dict[str, Any]:
+def tool_sidebrain_search(
+    query: str,
+    limit: int = 10,
+    status: str = "active",
+    type: str = "",
+    topic_key: str = "",
+) -> dict[str, Any]:
     """搜索处理后的记忆条目。
 
     Args:
@@ -43,57 +52,71 @@ def tool_sidebrain_search(query: str, limit: int = 10) -> dict[str, Any]:
     if not PROCESSED.exists():
         return {"entries": []}
 
-    query_lower = query.lower()
     results: list[dict[str, Any]] = []
 
-    for f in sorted(PROCESSED.rglob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            text = f.read_text(encoding="utf-8")
-        except Exception:
+    for entry, text in _load_entries_with_text():
+        if status != "all" and entry.get("status", "active") != status:
             continue
-
-        # 搜索 frontmatter + body
-        if query_lower not in text.lower():
+        if type and entry.get("type", "note") != type:
             continue
-
-        # 提取 frontmatter
-        frontmatter = _extract_frontmatter(text)
-        if not frontmatter:
+        if topic_key and entry.get("topic_key", "") != topic_key:
             continue
+        score = _score_entry(entry, text, query)
+        if score <= 0:
+            continue
+        ranked = dict(entry)
+        ranked["score"] = score
+        results.append(ranked)
 
-        # 提取 body
-        body_data = _extract_body(text)
-
-        entry = {
-            "id": frontmatter.get("id", ""),
-            "source": frontmatter.get("source", ""),
-            "created": frontmatter.get("created", ""),
-            "tags": frontmatter.get("tags", []),
-            "project": frontmatter.get("project", ""),
-            "confidence": frontmatter.get("confidence", 0),
-            "summary": body_data.get("summary", ""),
-            "key_points": body_data.get("key_points", []),
-            "action_items": body_data.get("action_items", []),
-            "file": str(f),
-        }
-        results.append(entry)
-
-        if len(results) >= limit:
-            break
-
-    return {"entries": results}
+    results.sort(key=lambda e: (e.get("score", 0), e.get("updated", ""), e.get("created", "")), reverse=True)
+    return {"entries": results[:limit]}
 
 
-def tool_sidebrain_ingest(text: str, source: str = "ad-hoc") -> dict[str, Any]:
-    """立即摄入文本。
+def tool_sidebrain_ingest(
+    text: str = "",
+    source: str = "ad-hoc",
+    summary: str = "",
+    key_points: list[str] | None = None,
+    action_items: list[str] | None = None,
+    decisions: list[Any] | None = None,
+    tags: list[str] | None = None,
+    topic_key: str = "",
+    type: str = "note",
+    status: str = "active",
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    """摄入文本或结构化记忆。
 
-    Args:
-        text: 要摄入的文本内容。
-        source: 来源标识。
-
-    Returns:
-        摄入结果。
+    传 summary 时直接写 processed；只传 text 时写 raw 等待处理。
     """
+    if summary:
+        from sidebrain.process.writer import write_processed
+
+        result = write_processed(
+            {
+                "summary": summary,
+                "key_points": key_points or [],
+                "action_items": action_items or [],
+                "decisions": decisions or [],
+                "tags": tags or [],
+                "topic_key": topic_key,
+                "type": type,
+                "status": status,
+                "confidence": confidence,
+            },
+            source=source,
+            source_path=f"mcp:{source}",
+            source_id=topic_key or summary[:80],
+        )
+        return {
+            "ingested": 1 if result.get("success") else 0,
+            "id": result.get("id"),
+            "path": result.get("path"),
+            "updated": result.get("updated", False),
+            "duplicate": result.get("duplicate", False),
+            "error": result.get("error"),
+        }
+
     result = ingest_text(text, source=source)
     return {"ingested": result["ingested"], "id": result.get("id")}
 
@@ -116,37 +139,53 @@ def tool_sidebrain_get(topic_id: str) -> dict[str, Any]:
     if not PROCESSED.exists():
         return {"entry": None}
 
-    for f in PROCESSED.rglob("*.md"):
-        try:
-            text = f.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
-        frontmatter = _extract_frontmatter(text)
-        if not frontmatter:
-            continue
-
-        entry_id = frontmatter.get("id", "")
-        if topic_id == entry_id or topic_id in f.stem:
-            body_data = _extract_body(text)
-            return {
-                "entry": {
-                    "id": entry_id,
-                    "source": frontmatter.get("source", ""),
-                    "created": frontmatter.get("created", ""),
-                    "updated": frontmatter.get("updated", ""),
-                    "tags": frontmatter.get("tags", []),
-                    "project": frontmatter.get("project", ""),
-                    "confidence": frontmatter.get("confidence", 0),
-                    "summary": body_data.get("summary", ""),
-                    "key_points": body_data.get("key_points", []),
-                    "action_items": body_data.get("action_items", []),
-                    "decisions": body_data.get("decisions", []),
-                    "people_mentioned": body_data.get("people_mentioned", []),
-                }
-            }
+    entries = [entry for entry, _text in _load_entries_with_text()]
+    for entry in entries:
+        if topic_id == entry.get("id") or topic_id == entry.get("topic_key") or topic_id in Path(entry["file"]).stem:
+            superseded_by_entries = _resolve_related(entries, [entry.get("superseded_by", "")])
+            expanded = dict(entry)
+            expanded["related_entries"] = _resolve_related(entries, entry.get("related", []))
+            expanded["supersedes_entries"] = _resolve_related(entries, entry.get("supersedes", []))
+            expanded["superseded_by_entry"] = superseded_by_entries[0] if superseded_by_entries else None
+            return {"entry": expanded}
 
     return {"entry": None}
+
+
+def tool_sidebrain_update(topic_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """更新单条记忆 frontmatter 字段。"""
+    allowed = {
+        "topic_key",
+        "type",
+        "status",
+        "confidence",
+        "tags",
+        "project",
+        "related",
+        "supersedes",
+        "superseded_by",
+        "resolved_reason",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    return _update_entry_frontmatter(topic_id, updates)
+
+
+def tool_sidebrain_resolve(topic_id: str, reason: str = "") -> dict[str, Any]:
+    """将记忆标记为 resolved，默认搜索不再返回。"""
+    updates: dict[str, Any] = {"status": "resolved"}
+    if reason:
+        updates["resolved_reason"] = reason
+    return _update_entry_frontmatter(topic_id, updates)
+
+
+def tool_sidebrain_supersede(topic_id: str, superseded_by: str = "", reason: str = "") -> dict[str, Any]:
+    """将记忆标记为 superseded。"""
+    updates: dict[str, Any] = {"status": "superseded"}
+    if superseded_by:
+        updates["superseded_by"] = superseded_by
+    if reason:
+        updates["resolved_reason"] = reason
+    return _update_entry_frontmatter(topic_id, updates)
 
 
 # ============================================================
@@ -155,27 +194,226 @@ def tool_sidebrain_get(topic_id: str) -> dict[str, Any]:
 
 
 def _extract_frontmatter(text: str) -> dict | None:
-    """提取 JSON frontmatter。"""
-    import re
+    """提取 JSON frontmatter 或 Node 端写入的 YAML-ish frontmatter。"""
     match = re.search(r"^---\s*(\{.*?\})\s*---\s*", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
-    return None
+
+    match = re.search(r"^---\n(.*?)\n---\s*", text, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        frontmatter = yaml.safe_load(match.group(1)) or {}
+    except yaml.YAMLError:
+        return None
+
+    if not isinstance(frontmatter, dict):
+        return None
+
+    text_hash = __import__("hashlib").sha256(text.encode("utf-8")).hexdigest()
+    frontmatter.setdefault("schema_version", 1)
+    frontmatter.setdefault("id", text_hash[:16])
+    frontmatter.setdefault("source", "sidebrain")
+    frontmatter.setdefault("source_id", frontmatter["id"])
+    frontmatter.setdefault("content_hash", text_hash)
+    frontmatter.setdefault("project", "")
+    frontmatter.setdefault("confidence", 0)
+    frontmatter.setdefault("type", "note")
+    frontmatter.setdefault("status", "active")
+    if not isinstance(frontmatter.get("tags", []), list):
+        frontmatter["tags"] = [str(frontmatter.get("tags"))]
+    return frontmatter
 
 
 def _extract_body(text: str) -> dict:
-    """提取 body JSON。"""
-    import re
+    """提取 body JSON；兼容 Node 端的 H1 + bullet Markdown。"""
     match = re.search(r"```json\n(.*?)\n```", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
-    return {}
+
+    body = {
+        "summary": "",
+        "key_points": [],
+        "action_items": [],
+        "decisions": [],
+        "people_mentioned": [],
+    }
+    for line in text.splitlines():
+        if line.startswith("# ") and not body["summary"]:
+            body["summary"] = line[2:].strip()
+        elif line.startswith("- "):
+            body["key_points"].append(line[2:].strip())
+    return body
+
+
+def _load_entries_with_text() -> list[tuple[dict[str, Any], str]]:
+    entries: list[tuple[dict[str, Any], str]] = []
+    if not PROCESSED.exists():
+        return entries
+
+    for f in sorted(PROCESSED.rglob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        frontmatter = _extract_frontmatter(text)
+        if not frontmatter:
+            continue
+        body_data = _extract_body(text)
+        entries.append((
+            {
+                "id": frontmatter.get("id", ""),
+                "topic_key": frontmatter.get("topic_key", ""),
+                "type": frontmatter.get("type", "note"),
+                "status": frontmatter.get("status", "active"),
+                "source": frontmatter.get("source", ""),
+                "created": frontmatter.get("created", ""),
+                "updated": frontmatter.get("updated", ""),
+                "tags": frontmatter.get("tags", []),
+                "project": frontmatter.get("project", ""),
+                "confidence": frontmatter.get("confidence", 0),
+                "summary": body_data.get("summary", ""),
+                "key_points": body_data.get("key_points", []),
+                "action_items": body_data.get("action_items", []),
+                "decisions": body_data.get("decisions", []),
+                "people_mentioned": body_data.get("people_mentioned", []),
+                "projects_mentioned": body_data.get("projects_mentioned", []),
+                "related": frontmatter.get("related", []),
+                "supersedes": frontmatter.get("supersedes", []),
+                "superseded_by": frontmatter.get("superseded_by", ""),
+                "file": str(f),
+            },
+            text,
+        ))
+    return entries
+
+
+def _score_entry(entry: dict[str, Any], text: str, query: str) -> int:
+    query_lower = query.strip().lower()
+    if not query_lower:
+        return 1
+
+    score = 0
+    topic_key = str(entry.get("topic_key", "")).lower()
+    summary = str(entry.get("summary", "")).lower()
+    tags = [str(tag).lower() for tag in entry.get("tags", [])]
+    key_points = [str(point).lower() for point in entry.get("key_points", [])]
+
+    if topic_key == query_lower:
+        score += 100
+    elif query_lower in topic_key:
+        score += 40
+    if query_lower in summary:
+        score += 30
+    if any(query_lower == tag for tag in tags):
+        score += 25
+    elif any(query_lower in tag for tag in tags):
+        score += 15
+    if any(query_lower in point for point in key_points):
+        score += 8
+    if query_lower in text.lower():
+        score += 1
+    return score
+
+
+def _brief_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": entry.get("id", ""),
+        "topic_key": entry.get("topic_key", ""),
+        "type": entry.get("type", "note"),
+        "status": entry.get("status", "active"),
+        "summary": entry.get("summary", ""),
+        "tags": entry.get("tags", []),
+    }
+
+
+def _resolve_related(entries: list[dict[str, Any]], identifiers: Any) -> list[dict[str, Any]]:
+    resolved: list[dict[str, Any]] = []
+    if isinstance(identifiers, str):
+        identifiers = [identifiers]
+    if not isinstance(identifiers, list):
+        return resolved
+    for identifier in identifiers:
+        if not identifier:
+            continue
+        for entry in entries:
+            if identifier in {entry.get("id"), entry.get("topic_key")} or identifier in Path(entry["file"]).stem:
+                resolved.append(_brief_entry(entry))
+                break
+    return resolved
+
+
+def _split_frontmatter_body(text: str) -> tuple[dict[str, Any] | None, str]:
+    """Return parsed frontmatter and body text after either supported frontmatter format."""
+    json_match = re.search(r"^---\s*(\{.*?\})\s*---\s*", text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1)), text[json_match.end():]
+        except json.JSONDecodeError:
+            return None, text
+
+    yaml_match = re.search(r"^---\n(.*?)\n---\s*", text, re.DOTALL)
+    if yaml_match:
+        return _extract_frontmatter(text), text[yaml_match.end():]
+
+    return None, text
+
+
+def _format_with_frontmatter(frontmatter: dict[str, Any], body_text: str) -> str:
+    frontmatter["updated"] = __import__("time").strftime("%Y-%m-%d")
+    fm_json = json.dumps(frontmatter, ensure_ascii=False, indent=2)
+    return f"---{fm_json}---\n\n{body_text.lstrip()}"
+
+
+def _find_entry_file(topic_id: str) -> Path | None:
+    if not PROCESSED.exists():
+        return None
+
+    for f in PROCESSED.rglob("*.md"):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        frontmatter = _extract_frontmatter(text)
+        if not frontmatter:
+            continue
+        if (
+            topic_id == frontmatter.get("id")
+            or topic_id == frontmatter.get("topic_key")
+            or topic_id in f.stem
+        ):
+            return f
+    return None
+
+
+def _update_entry_frontmatter(topic_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    entry_file = _find_entry_file(topic_id)
+    if not entry_file:
+        return {"updated": False, "error": "not_found", "topic_id": topic_id}
+
+    text = entry_file.read_text(encoding="utf-8")
+    frontmatter, body_text = _split_frontmatter_body(text)
+    if not frontmatter:
+        return {"updated": False, "error": "invalid_frontmatter", "path": str(entry_file)}
+
+    frontmatter.update(updates)
+    tmp = entry_file.with_suffix(".md.tmp")
+    tmp.write_text(_format_with_frontmatter(frontmatter, body_text), encoding="utf-8")
+    tmp.replace(entry_file)
+    return {
+        "updated": True,
+        "id": frontmatter.get("id"),
+        "topic_key": frontmatter.get("topic_key", ""),
+        "status": frontmatter.get("status", "active"),
+        "path": str(entry_file),
+    }
 
 
 # ============================================================
@@ -187,6 +425,9 @@ _TOOL_HANDLERS: dict[str, Any] = {
     "sidebrain_ingest": tool_sidebrain_ingest,
     "sidebrain_list_projects": tool_sidebrain_list_projects,
     "sidebrain_get": tool_sidebrain_get,
+    "sidebrain_update": tool_sidebrain_update,
+    "sidebrain_resolve": tool_sidebrain_resolve,
+    "sidebrain_supersede": tool_sidebrain_supersede,
 }
 
 # MCP 工具定义（返回给 Pi 用于发现）
@@ -199,6 +440,9 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "query": {"type": "string", "description": "搜索关键词"},
                 "limit": {"type": "integer", "description": "最大返回条数", "default": 10},
+                "status": {"type": "string", "description": "状态过滤：active/resolved/superseded/archived/all", "default": "active"},
+                "type": {"type": "string", "description": "记忆类型过滤，如 decision/problem-solution/gotcha/note"},
+                "topic_key": {"type": "string", "description": "按稳定主题键精确过滤"},
             },
             "required": ["query"],
         },
@@ -211,8 +455,16 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "properties": {
                 "text": {"type": "string", "description": "要摄入的文本内容"},
                 "source": {"type": "string", "description": "来源标识", "default": "ad-hoc"},
+                "summary": {"type": "string", "description": "摘要；提供时进入结构化模式并直接写 processed"},
+                "key_points": {"type": "array", "items": {"type": "string"}},
+                "action_items": {"type": "array", "items": {"type": "string"}},
+                "decisions": {"type": "array"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "topic_key": {"type": "string", "description": "主题稳定键；相同 active topic_key 会更新旧记忆"},
+                "type": {"type": "string", "default": "note"},
+                "status": {"type": "string", "default": "active"},
+                "confidence": {"type": "number"},
             },
-            "required": ["text"],
         },
     },
     {
@@ -230,6 +482,43 @@ _TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "topic_id": {"type": "string", "description": "记忆 ID 或文件名关键词"},
+            },
+            "required": ["topic_id"],
+        },
+    },
+    {
+        "name": "sidebrain_update",
+        "description": "更新单条记忆的元数据字段",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic_id": {"type": "string", "description": "记忆 ID、topic_key 或文件名关键词"},
+                "fields": {"type": "object", "description": "允许更新 topic_key/type/status/confidence/tags/project/related/supersedes"},
+            },
+            "required": ["topic_id", "fields"],
+        },
+    },
+    {
+        "name": "sidebrain_resolve",
+        "description": "将记忆标记为 resolved，使其默认不再出现在搜索结果中",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic_id": {"type": "string", "description": "记忆 ID、topic_key 或文件名关键词"},
+                "reason": {"type": "string", "description": "处理原因"},
+            },
+            "required": ["topic_id"],
+        },
+    },
+    {
+        "name": "sidebrain_supersede",
+        "description": "将记忆标记为 superseded",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "topic_id": {"type": "string", "description": "记忆 ID、topic_key 或文件名关键词"},
+                "superseded_by": {"type": "string", "description": "替代它的新记忆 ID 或 topic_key"},
+                "reason": {"type": "string", "description": "替代原因"},
             },
             "required": ["topic_id"],
         },
